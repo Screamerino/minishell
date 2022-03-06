@@ -1,81 +1,32 @@
-#include "libft.h"
-#include <stdio.h>
-#include <fcntl.h>
-#include "command.h"
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   utils.c                                            :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: lcoreen <lcoreen@student.21-school.ru>     +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2022/02/27 21:50:49 by lcoreen           #+#    #+#             */
+/*   Updated: 2022/03/01 13:03:42 by lcoreen          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
 
-int	ft_error(char *str)
+#include "minishell.h"
+
+void	close_pipe(int *pipefd)
 {
-	ft_putendl_fd(str, 2);
-	return (1);
+	close(pipefd[0]);
+	close(pipefd[1]);
 }
 
-int		is_space(char c)
+int	close_files_and_pipe(t_cmd *cmd)
 {
-	return (c == ' ' || c == '\t' || c == '\r' ||
-		c == '\f' || c == '\n' || c == '\v');
-}
-
-
-void	print_list(t_list *lst)
-{
-	int	i;
-	
-	i = 0;
-	while (lst)
-	{
-		printf("cmd %d: %s\n", i, lst->content);
-		lst = lst->next;
-		++i;
-	}
-}
-
-int	open_file(t_cmd *cmd, char *file, char redir)
-{
-	if (redir == '>')
-	{
-		if (cmd->outf != -1)
-			close(cmd->outf);
-		cmd->outf = open(file, O_CREAT | O_RDWR | O_TRUNC, 0644);
-	}
-	else if (redir == '<')
-	{
-		if (cmd->inf != -1)
-			close(cmd->inf);
-		cmd->inf = open(file, O_RDONLY, 0644);
-	}
-	return (0);
-}
-
-int	close_files(t_cmd *cmd)
-{
-	if (cmd->inf != -1)
+	if (cmd->inf >= 0)
 		close(cmd->inf);
-	if (cmd->outf != -1)
+	if (cmd->outf >= 0)
 		close(cmd->outf);
+	if (cmd->heredoc_flag)
+		close_pipe(cmd->heredoc_pipe);
 	return (0);
-}
-
-// t_cmd	*init_cmd(char *cmd)
-// {
-// 	t_cmd	*elem;
-
-// 	if (cmd == NULL)
-// 		return (NULL);
-// 	elem = (t_cmd *) malloc(sizeof(t_cmd));
-// 	elem->cmd = cmd;
-// 	elem->inf = -1;
-// 	elem->outf = -1;
-// 	elem->is_full_cmd = 0;
-// 	return (elem);
-// }
-
-void	free_cmd(void *cmd)
-{
-	t_cmd	*tmp;
-
-	tmp = (t_cmd *) cmd;
-	free(tmp->cmd);
-	free(tmp);
 }
 
 char	*join_list(t_list *lst)
@@ -83,18 +34,54 @@ char	*join_list(t_list *lst)
 	char	*tmp;
 	char	*ret;
 
-	ret = ft_strdup(lst->content);
+	ret = NULL;
+	if (!lst)
+		return (NULL);
 	while (lst->next)
 	{
-		tmp = ft_strjoin(ret, lst->next->content);
-		free(ret);
-		ret = tmp;
+		if (!ret && lst->content)
+			ret = ft_strdup(lst->content);
+		if (ret && lst->next && lst->next->content)
+		{
+			tmp = ft_strjoin(ret, lst->next->content);
+			free(ret);
+			ret = tmp;
+		}
 		lst = lst->next;
 	}
+	if (!ret && lst->content)
+		ret = ft_strdup(lst->content);
 	return (ret);
 }
 
-int	is_desired_sign(char c)
+int	check_redirect(char *str)
 {
-	return (c == '\'' || c == '"' || c == '$' || c == '\\');
+	char	redir;
+
+	redir = str[0];
+	if (str[1] == str[0])
+	{
+		if (str[0] == '>')
+			return (DOUBLE_RIGHT_REDIR);
+		else if (str[1] == '<')
+			return (DOUBLE_LEFT_REDIR);
+	}
+	if (str[0] == '>')
+		return (RIGHT_REDIR);
+	return (LEFT_REDIR);
+}
+
+int	go_to_end_redir(char *str, int *i)
+{
+	int	find_word;
+
+	find_word = 0;
+	while (str[*i] && ((!find_word && is_space(str[*i]))
+			|| (!is_space(str[*i]) && !is_redirect(str[*i]))))
+	{
+		if (!find_word && !is_space(str[*i]))
+			find_word = *i;
+		++(*i);
+	}
+	return (find_word);
 }

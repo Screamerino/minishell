@@ -1,154 +1,97 @@
-#include "libft.h"
-#include <stdio.h>
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   parser.c                                           :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: lcoreen <lcoreen@student.21-school.ru>     +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2022/02/13 21:31:08 by lcoreen           #+#    #+#             */
+/*   Updated: 2022/03/01 12:57:36 by lcoreen          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "minishell.h"
 
-char *slash(char *str, int *i, int in_quotes);
-char *dollar(char *str, int *i);
-char *quote(char *str, int *i);
-char *double_quote(char *str, int *i);
-int	redir(t_cmd *cmd, char *str, int *i);
-
-int preparser(char *str)
+static int	parse_argument(t_data *d, t_list **arg, int *i, int k)
 {
-	char quote;
-
-	quote = 0;
-	while (*str)
-	{
-		if (!quote && (*str == '\'' || *str == '"'))
-			quote = *str;
-		else if (quote && *str == quote)
-			quote = 0;
-		++str;
-	}
-	if (quote)
-		return (1);
-	return (0);
-}
-
-static int	parse_argument(t_cmd *cmd, t_list **arg, char *str, int *i)
-{
-	int	j;
-	int	started_i;
+	int		j;
+	int		started_i;
+	char	*tmp;
 
 	j = *i;
-	while (str[*i] && !is_space(str[*i]))	
+	while (d->c[k]->str[*i] && !is_space(d->c[k]->str[*i]))
 	{
+		tmp = NULL;
 		started_i = *i;
-		if (is_desired_sign(str[*i]) && *i != j)
-			ft_lstadd_back(arg, ft_lstnew(ft_substr(str, j, *i - j)));
-		if (str[*i] == '\'')
-			ft_lstadd_back(arg, ft_lstnew(quote(str, i)));
-		else if (str[*i] == '"')
-			ft_lstadd_back(arg, ft_lstnew(double_quote(str, i)));
-		else if (str[*i] == '$')
-			ft_lstadd_back(arg, ft_lstnew(dollar(str, i)));
-		else if (str[*i] == '\\')
-			ft_lstadd_back(arg, ft_lstnew(slash(str, i, 0)));
-		else if (str[*i] == '<' || str[*i] == '>')
-			redir(cmd, str, i);
-		++(*i);
-		if (started_i + 1 != *i)
+		if (is_desired_sign(d->c[k]->str[*i], 0) && *i != j)
+			ft_lstadd_back(arg, ft_lstnew(ft_substr(d->c[k]->str, j, *i - j)));
+		if (is_desired_sign(d->c[k]->str[*i], 0))
+			tmp = handle_sign(d, d->c[k]->str, i);
+		else if (is_redirect(d->c[k]->str[*i]) && \
+			redir(d, d->c[k]->str, i, k))
+			return (-1);
+		if (tmp)
+			ft_lstadd_back(arg, ft_lstnew(tmp));
+		if (started_i != *i)
 			j = *i;
+		if (d->c[k]->str[*i] && started_i == *i)
+			++(*i);
 	}
 	return (j);
 }
 
-static int	get_arguments(t_cmd *cmd, char *str)
+static int	get_arguments(t_data *d, int k)
 {
 	t_list	*arg;
 	int		i;
 	int		j;
-	
+
 	arg = NULL;
 	i = 0;
-	while (str[i])
+	while (d->c[k]->str[i])
 	{
-		while (str[i] && is_space(str[i]))
+		while (d->c[k]->str[i] && is_space(d->c[k]->str[i]))
 			++i;
-		if (!str[i])
-			break;
-		j = parse_argument(cmd, &arg, str, &i);
-		if (i != j)
-			ft_lstadd_back(&arg, ft_lstnew(ft_substr(str, j, i - j)));
-		if (arg)
+		if (!d->c[k]->str[i])
+			break ;
+		j = parse_argument(d, &arg, &i, k);
+		if (j == -1)
 		{
-			ft_lstadd_back(&cmd->cmd, ft_lstnew(join_list(arg)));
 			ft_lstclear(&arg, free);
+			return (1);
 		}
+		if (i != j)
+			ft_lstadd_back(&arg, ft_lstnew(ft_substr(d->c[k]->str, j, i - j)));
+		if (arg)
+			ft_lstadd_back(&d->c[k]->cmd, ft_lstnew(join_list(arg)));
+		ft_lstclear(&arg, free);
 	}
 	return (0);
 }
 
-static int	parser(char *str, char c, char **env)
+void	parser_and_execute(t_data *d)
 {
-	int 	i;
-	t_cmd	cmd;
+	int	i;
+	int	pipefd[2];
+	int	input;
 
 	i = 0;
-	cmd.outf = -1;
-	cmd.inf = -1;
-	cmd.cmd = NULL;
-	get_arguments(&cmd, str);
-	execute_cmd(&cmd, c, env);
-	free(str);
-	ft_lstclear(&cmd.cmd, free);
-	close_files(&cmd);
-	return (0);
-}
-
-
-static int	split_pipe(char *str, char **env)
-{
-	char quote;
-	int i;
-	int j;
-
-	quote = 0;
-	i = 0;
-	while (str[i])
+	input = -1;
+	while (i < d->count_cmds)
 	{
-		j = i;
-		while (str[i] && (str[i] != '|' || quote))
+		if (d->count_cmds > 1 && i + 1 < d->count_cmds)
+			pipe(pipefd);
+		d->fork_status = 0;
+		if (!get_arguments(d, i) && d->c[i]->cmd)
+			execute_cmd(d, pipefd, input, i);
+		if (d->count_cmds > 1)
 		{
-			if (!quote && (str[i] == '\'' || str[i] == '"'))
-				quote = str[i];
-			else if (quote && str[i] == quote)
-				quote = 0;
-			++i;
+			if (i)
+				close(input);
+			input = pipefd[0];
+			if (i + 1 < d->count_cmds)
+				close(pipefd[1]);
 		}
-		if (!quote)
-			parser(ft_substr(str, j, i - j), str[i], env);
-		if (str[i])
-			++i;
+		++i;
 	}
-	free(str);
-	return (0);
-}
-
-int	split_cmds(char *str, char **env)
-{
-	char quote;
-	int i;
-	int j;
-
-	quote = 0;
-	i = 0;
-	while (str[i])
-	{
-		j = i;
-		while (str[i] && (str[i] != ';' || quote))
-		{
-			if (!quote && (str[i] == '\'' || str[i] == '"'))
-				quote = str[i];
-			else if (quote && str[i] == quote)
-				quote = 0;
-			++i;
-		}
-		if (!quote)
-			split_pipe(ft_substr(str, j, i - j), env);
-		if (str[i])
-			++i;
-	}
-	return (0);
 }

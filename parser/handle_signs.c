@@ -1,51 +1,68 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   handle_signs.c                                     :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: lcoreen <lcoreen@student.21-school.ru>     +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2022/02/19 13:56:29 by lcoreen           #+#    #+#             */
+/*   Updated: 2022/02/27 22:40:05 by lcoreen          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "minishell.h"
 
-char	*slash(char *str, int *i, int in_quotes)
+char	*handle_sign(t_data *data, char *str, int *i)
 {
-	int		j;
-	int		hide_slash;
+	char	*tmp;
 
-	j = (*i)++;
-	hide_slash = 1;
-	if (in_quotes && 
-		(str[*i + 1] != '"' && str[*i + 1] != '$' && str[*i + 1] != '\\'))
-		hide_slash = 0;
-	while (str[*i] && is_space(str[*i]))
-		++(*i);
-	return (ft_substr(str, j + hide_slash, *i - j - 1));
+	tmp = NULL;
+	if (str[*i] == '\'')
+		tmp = quote(str, i);
+	else if (str[*i] == '"')
+		tmp = double_quote(str, i, data);
+	else if (str[*i] == '$')
+		tmp = dollar(str, i, data);
+	return (tmp);
 }
 
-char	*dollar(char *str, int *i)
+char	*dollar(char *str, int *i, t_data *data)
 {
 	int		j;
 	char	*tmp;
-	char	*tmp2;
+	char	*item;
 
 	j = (*i)++;
-	while (str[*i] && ft_isalnum(str[*i]))
+	if (str[*i] == '?' && (*i)++)
+		return (ft_itoa(data->status));
+	if (ft_isdigit(str[*i]) && (*i)++)
+		return (NULL);
+	while (str[*i] && (ft_isalnum(str[*i]) || str[*i] == '_'))
 		++(*i);
 	if (*i - j - 1 == 0)
 		return (ft_strdup("$"));
 	tmp = ft_substr(str, j + 1, *i - j - 1);
-	tmp2 = getenv(tmp);
+	item = get_value_env(data->env, tmp);
 	free(tmp);
-	if (tmp2 == NULL)
+	if (item == NULL)
 		return (NULL);
-	tmp = ft_strdup(tmp2);
-	return (tmp);
+	return (ft_strdup(item));
 }
 
 char	*quote(char *str, int *i)
 {
-	int	j;
+	int		j;
+	char	*tmp;
 
 	j = (*i)++;
 	while (str[*i] && str[*i] != '\'')
 		(*i)++;
-	return (ft_substr(str, j + 1, *i - j - 1));
+	tmp = ft_substr(str, j + 1, *i - j - 1);
+	++(*i);
+	return (tmp);
 }
 
-char	*double_quote(char *str, int *i)
+char	*double_quote(char *str, int *i, t_data *data)
 {
 	int		j;
 	t_list	*lst;
@@ -57,43 +74,19 @@ char	*double_quote(char *str, int *i)
 	{
 		if (str[*i] == '$')
 		{
-			ft_lstadd_back(&lst, ft_lstnew(ft_substr(str, j, *i - j)));
-			tmp = dollar(str, i);
+			if (*i != j)
+				ft_lstadd_back(&lst, ft_lstnew(ft_substr(str, j, *i - j)));
+			tmp = dollar(str, i, data);
 			if (tmp)
 				ft_lstadd_back(&lst, ft_lstnew(tmp));
 			j = *i;
 		}
-		else if (str[*i] == '\\')
-		{
-			ft_lstadd_back(&lst, ft_lstnew(ft_substr(str, j, *i - j)));
-			tmp = slash(str, i, 1);
-			ft_lstadd_back(&lst, ft_lstnew(tmp));
-			j = *i;
-		}
-		++(*i);
+		if (str[*i] != '"' && str[*i] != '$')
+			++(*i);
 	}
 	ft_lstadd_back(&lst, ft_lstnew(ft_substr(str, j, *i - j)));
 	tmp = join_list(lst);
 	ft_lstclear(&lst, free);
+	++(*i);
 	return (tmp);
-}
-
-int	redir(t_cmd *cmd, char *str, int *i)
-{
-	int	find_word;
-	char	type_redir;
-	char	*file;
-
-	find_word = 0;
-	type_redir = str[(*i)++];
-	while (str[*i] && ((!find_word && is_space(str[*i])) ||
-			!is_space(str[*i])))
-	{
-		if (!find_word && !is_space(str[*i]))
-			find_word = *i;
-		++(*i);
-	}
-	file = ft_substr(str, find_word, *i - find_word);
-	open_file(cmd, file, type_redir);
-	return (0);
 }

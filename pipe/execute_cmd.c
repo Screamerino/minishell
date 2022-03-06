@@ -1,73 +1,97 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   execute_cmd.c                                      :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: lcoreen <lcoreen@student.21-school.ru>     +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2022/02/13 21:13:58 by lcoreen           #+#    #+#             */
+/*   Updated: 2022/03/02 16:04:46 by lcoreen          ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "minishell.h"
-#include "command.h"
 
-static char **transform_list_to_array(t_list *lst)
+static char	**transform_list_to_array(t_list *lst)
 {
-    char    **array;
-    int     size;
-    int     i;
+	char	**array;
+	int		size;
+	int		i;
 
-    i = 0;
-    size = ft_lstsize(lst);
-    array = (char **) malloc(sizeof(char *) * (size + 1));
-    while (i < size)
-    {
-        array[i] = lst->content;
-        lst = lst->next;
-        ++i;
-    }
-    array[i] = NULL;
-    return (array);
+	i = 0;
+	size = ft_lstsize(lst);
+	array = (char **) malloc(sizeof(char *) * (size + 1));
+	while (i < size)
+	{
+		array[i] = ft_strdup(lst->content);
+		lst = lst->next;
+		++i;
+	}
+	array[i] = NULL;
+	return (array);
 }
 
-static void	run_child(t_cmd *info, char **env)
+static void	run_child(t_data *data, int i)
 {
 	char	*cmd;
 	char	**new_argv;
+	char	**env;
 
-	new_argv = transform_list_to_array(info->cmd);
-	cmd = get_cmd(new_argv[0]);
+	tcsetattr(0, TCSANOW, &data->default_tty);
+	new_argv = transform_list_to_array(data->c[i]->cmd);
+	cmd = get_cmd(data->env, new_argv[0]);
+	if (!cmd)
+		exit(command_not_found(new_argv[0]));
+	env = transform_env_to_array(data->env);
+	free_data(&data);
+	signal(SIGINT, SIG_DFL);
+	signal(SIGQUIT, SIG_DFL);
 	execve(cmd, new_argv, env);
-	perror("execve");
+	ft_error(new_argv[0], 1);
 	free(cmd);
-	ft_freearr(new_argv);
+	ft_freearr(&new_argv);
+	ft_freearr(&env);
 	exit(1);
 }
 
-int	execute_cmd(t_cmd *cmd, char c, char **env)
+void	child(t_data *data, int *pipefd, int input, int i)
 {
-	int		pipefd[2];
-	pid_t	child;
-
-	if (c == '|')
-		pipe(pipefd);
-	child = fork();
-	if (child == 0)
+	if (data->count_cmds > 1 && i)
 	{
-		if (c == '|')
-        {
-			close(pipefd[0]);
-            dup2(pipefd[1], 1);
-            close(pipefd[1]);
-        }
-		if (cmd->inf != -1)
-			dup2(cmd->inf, 0);
-		if (cmd->outf != -1)
-			dup2(cmd->outf, 1);
-		close_files(cmd);
-		run_child(cmd, env);
+		dup2(input, 0);
+		close(input);
 	}
-	else if (child > 0)
+	if (data->count_cmds > 1 && i + 1 < data->count_cmds)
 	{
-		if (c == '|')
-        {
-            close(pipefd[1]);
-		    dup2(pipefd[0], 0);
-            close(pipefd[0]);
-        }
-		wait(NULL);
-		close_files(cmd);
+		dup2(pipefd[1], 1);
+		close(pipefd[1]);
+		close(pipefd[0]);
 	}
-	return (0);
+	check_builtin(data->c[i]->cmd->content, data, i);
+	if (data->c[i]->inf != -1)
+		dup2(data->c[i]->inf, 0);
+	if (data->c[i]->heredoc_flag)
+		dup2(data->c[i]->heredoc_pipe[0], 0);
+	if (data->c[i]->outf != -1)
+		dup2(data->c[i]->outf, 1);
+	close_files_and_pipe(data->c[i]);
+	run_child(data, i);
 }
 
+int	execute_cmd(t_data *data, int *pipefd, int input, int i)
+{
+	pid_t	pid;
+
+	signal(SIGINT, SIG_IGN);
+	if (check_builtin(data->c[i]->cmd->content, data, i))
+	{
+		pid = fork();
+		if (!pid)
+			child(data, pipefd, input, i);
+		else
+			data->pid_arr[data->valid_cmds] = pid;
+		++data->valid_cmds;
+	}
+	close_files_and_pipe(data->c[i]);
+	return (0);
+}
